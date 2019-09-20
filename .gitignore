@@ -1,1 +1,8 @@
 *~
+gcc
+gdb
+binutils
+newlib
+log*/
+bd-*
+
