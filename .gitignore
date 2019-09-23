@@ -5,4 +5,5 @@ binutils
 newlib
 log*/
 bd-*
-
+avr32-gnu-toolchain*
+gs-avr32-toolchain*

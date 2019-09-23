@@ -39,9 +39,9 @@ clone_tool () {
 # Clone all the AVR32 tool components. Note that we need two copies of the
 # binutils-gdb repo, to allow us to work with different versions (branches) of
 # binutils and gdb
-clone_tool embecosm binutils http://github.com/embecosm/avr32-binutils-gdb.git
-clone_tool embecosm gcc      http://github.com/embecosm/avr32-gcc.git
-clone_tool embecosm newlib   http://github.com/embecosm/avr32-newlib.git
+clone_tool origin binutils git@github.com:GomSpace/avr32-binutils-gdb.git
+clone_tool origin gcc      git@github.com:GomSpace/avr32-gcc.git
+clone_tool origin newlib   git@github.com:GomSpace/avr32-newlib.git
 cp -rd binutils gdb
 
 # We perhaps ought to allow an option to check out specific versions. For now

@@ -56,7 +56,7 @@
 # --install-dir <install_dir>
 
 #     The directory in which the tool chain should be installed. Default
-#     /opt/avr32.
+#     /usr/local/avr32-gnu-toolchain-linux_x86_64.
 
 # --symlink-dir <symlink_dir>
 
@@ -78,7 +78,7 @@
 # --auto-pull | --no-auto-pull
 
 #     If specified, a "git pull" will be done in each component repository
-#     after checkout to ensure the latest code is in use. Default is to pull.
+#     after checkout to ensure the latest code is in use. Default is not to pull.
 
 # --datestamp-install
 
@@ -127,7 +127,8 @@ unset jobs
 unset load
 
 # Set some useful constants
-VERSION=3.4.2
+VERSION=3.4.2_gs1
+PATCHLEVEL=435
 
 # Set defaults for some options
 rootdir=`(cd .. && pwd)`
@@ -138,9 +139,9 @@ bd_gcc=${builddir}/gcc
 bd_newlib=${builddir}/newlib
 bd_gdb=${builddir}/gdb
 logdir="${rootdir}/logs-${VERSION}"
-installdir="/opt/avr32"
+installdir="/usr/local/avr32-gnu-toolchain-linux_x86_64"
 autocheckout="--auto-checkout"
-autopull="--auto-pull"
+autopull="--no-auto-pull"
 make_load="`(echo processor; cat /proc/cpuinfo 2>/dev/null) \
            | grep -c processor`"
 jobs=${make_load}
@@ -256,7 +257,7 @@ echo "Checking out GIT trees" >> "${logfile}"
 echo "======================" >> "${logfile}"
 
 echo "Checking out GIT trees ..."
-if ! ${rootdir}/toolchain/avr32-versions.sh ${rootdir} ${autocheckout} \
+if ! ${rootdir}/scripts/avr32-versions.sh ${rootdir} ${autocheckout} \
          ${autopull} >> "${logfile}" 2>&1
 then
     echo "ERROR: Failed to checkout GIT versions of tools"
@@ -360,7 +361,7 @@ mkdir -p "${bd_gcc_bs}"
 cd "${bd_gcc_bs}"
 
 # Configure the build
-if "${rootdir}/gcc"/configure --target=avr32 \
+if CFLAGS='-fgnu89-inline' CXXFLAGS='-fgnu89-inline' "${rootdir}/gcc"/configure --target=avr32 \
         --disable-libssp --disable-shared \
         --disable-threads --disable-nls \
         --disable-libstdcxx-pch --without-headers \
@@ -429,6 +430,7 @@ if "${rootdir}/newlib"/configure --target=avr32 \
         --enable-newlib-io-pos-args \
         --enable-newlib-reent-small \
         --enable-target-optspace \
+       	--enable-newlib-retargetable-locking \
         --with-pkgversion="AVR32 toolchain ${VERSION} (built $(date +%Y%m%d))" \
         --with-bugurl="http://www.atmel.com/avr" \
         --prefix=${installdir} >> "${logfile}" 2>&1
@@ -486,7 +488,7 @@ mkdir -p "${bd_gcc}"
 cd "${bd_gcc}"
 
 # Configure the build
-if "${rootdir}/gcc"/configure --target=avr32 \
+if CFLAGS='-fgnu89-inline' CXXFLAGS='-fgnu89-inline' "${rootdir}/gcc"/configure --target=avr32 \
         --disable-libssp --disable-shared \
         --disable-threads --disable-nls \
         --disable-libstdcxx-pch --without-headers \
@@ -600,6 +602,22 @@ else
     echo "- see ${logfile}"
     exit 1
 fi
+
+# Create tarball 
+echo "Create tarball for install" >> "${logfile}"
+cd "${rootdir}"
+tar czf avr32-gnu-toolchain-${VERSION}.${PATCHLEVEL}-linux.any.x86_64.tar.gz -C /usr/local avr32-gnu-toolchain-linux_x86_64
+
+# Combine toolchain with headers, avr32 program and install script
+echo "Create combined installation package" >> "${logfile}"
+cd "${rootdir}"
+tooldir="gs-avr32-toolchain-${VERSION}"
+rm -rf "${tooldir}"
+mkdir "${tooldir}"
+cp install_package/* "${tooldir}"
+cp "avr32-gnu-toolchain-${VERSION}.${PATCHLEVEL}-linux.any.x86_64.tar.gz" "${tooldir}"
+sed -i "s/avr32-gnu-toolchain-3.4.2.435/avr32-gnu-toolchain-${VERSION}.${PATCHLEVEL}/" "${tooldir}/install-avr32.sh"
+tar czf "${tooldir}.tar.gz" "${tooldir}"
 
 # All tools built
 echo "DONE AVR32: $(date)" >> "${logfile}"
