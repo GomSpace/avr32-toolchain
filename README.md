@@ -12,55 +12,65 @@ the relevant tool chain component repositories.
 
 ## Prequisites
 
-You will need a Linux like environment (Cygwin and MinGW environments under
-Windows should work as well).
+You will need a Linux like environment with docker installed.
 
-You will need the standard GNU tool chain pre-requisites as documented in
-[GCC website](http://gcc.gnu.org/install/prerequisites.html)
 
-Finally you will need to check out the repositories for each of the tool chain
-components (its not all one big repository). These should be peers of this
-toolchain directory. If you have yet to check any repository out, then the
-following should be appropriate for creating a new directory, `avr32` with all
-the components.
+## Building The Toolchain
 
-    mkdir avr32
-    cd avr32
-    git clone git@github.com:embecosm/avr32-binutils-gdb.git binutils
-    git clone git@github.com:embecosm/avr32-gcc.git gcc
-    git clone git@github.com:embecosm/avr32-newlib.git newlib
-    git clone git@github.com:embecosm/avr32-toolchain.git toolchain
-    cp -rd binutils gdb
-    cd toolchain
+The `buildall` script clones the various GNU gcc, binutils and newlib source
+repos and then builds everything from source.
 
-__Note.__ The avr32-binutils-gdb repository is needed twice, to allow us
-potentially to build tool chains with different versions (i.e. branches) of
-binutils and GDB.
+The repos referenced are the original GNU sources but with Atmel patches
+already applied.
 
-For convenience, clone just the toolcahin repository, then run the script
-[avr32-clone-all.sh](https://github.com/embecosm/avr32-toolchain/blob/avr32-toolchain-mainline/avr32-clone-all.sh)
-in the toolchain directory, which will do the cloning for you:
+Because we are working with ancient code here, a modern Linux will have
+trouble building it without installing some pretty old versions of texinfo,
+automake and autoconf.
 
-    mkdir avr32
-    cd avr32
-    git clone git@github.com:embecosm/avr32-toolchain.git toolchain
-    cd toolchain
-    ./avr32-clone-all.sh
+This is the reason we build everything inside a docker container.
+The docker container then runs the `buildall` script.
 
-## Building the tool chain
+In brief, build with:
 
-The script `build-all.sh` will build and install the AVR 32-bit tool chain. Use:
+```commandline
+    ./buildall clone
+    ./runincontainer
+```
 
-    ./build-all.sh --help
+The `./buildall clone` step clones the repos we need. It takes a while.
+It needs to be done outside the container to avoid issues with git/ssh
+credentials and permissions.
 
-to see the toptions available.
+## Original Source Archives
 
-The script `avr32-versions.sh` specifies the branches to use in each component
-git repository. It should be edited to change the default branches if
-required.
+  - [https://ww1.microchip.com/downloads/en/DeviceDoc/atmel-headers-6.1.3.1475.zip](https://ww1.microchip.com/downloads/en/DeviceDoc/atmel-headers-6.1.3.1475.zip)
 
-Having checked out the correct branches and built a unified source directory,
-`build-all.sh` first builds and installs the tool chain.
+
+## Other Projects
+
+* [embecosm/avr32-toolchain: Scripts for building and testing the AVR 32-bit GNU tool chain](https://github.com/embecosm/avr32-toolchain)
+  was the original work which the previous version of
+  [GomSpace/avr32-toolchain](https://github.com/GomSpace/avr32-toolchain)
+  was based on.
+* [kuhlix/avr32-toolchain](https://github.com/kuhlix/avr32-toolchain)
+  is one of many forks of original repo in
+  [jsnyder/avr32-toolchain: Makefile & supporting patches/scripts to build an AVR32 toolchain.](https://github.com/jsnyder/avr32-toolchain)
+  - It seems to be the most maintained of all the forks
+  - It uses a Makefile to build everything from sources and has various fixes
+    for building on fairly recent gcc versions and recent distributions.
+  - The Makefile is pretty readable and not too big. It downloads the gcc
+    toolchain sources and the avr32 patches from the atmel.com.
+    Then the sources are  patched and everything is built.
+  - Some download URLs work and some don't.
+
+
+## Other Resources
+
+* [AVR32 compiler - MAV'RIC Library](http://lis-epfl.github.io/MAVRIC_Library/Toolchain/AVR32_compiler.html)
+  is a page about the avr32 toolchain, how to get it and build it. It refers to
+  [lis-epfl/avr32-toolchain](https://github.com/denravonska/avr32-toolchain)
+  for building on MacOS and that repo which is another clone of aforementioned
+  *jsnyder/avr32-toolchain* repo.
 
 ## Other information
 

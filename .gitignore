@@ -1,1 +1,8 @@
 *~
+*.log
+
+# various git clone and build artefacts
+/.done
+/avr32
+/build
+/install

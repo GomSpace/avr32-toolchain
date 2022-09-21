@@ -1,0 +1,614 @@
+#!/bin/bash
+
+# Copyright (C) 2006 Atmel Corp.
+# Copyright (C) 2013 Embecosm Limited
+
+# Contributor Per Arnold Blaasmo
+# Contributor Jeremy Bennett <jeremy.bennett@embecosm.com>
+
+# This file is a script for building AVR32 tool chains under git.
+
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation; either version 3 of the License, or (at your option)
+# any later version.
+
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+# more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#		     SCRIPT TO BUILD AVR32-ELF TOOL CHAIN
+#		     ====================================
+
+# This script builds the AVR 32-bit tool chain as held in git. It is assumed
+# to be run from the toolchain directory (i.e. with binutils, cgen, gcc,
+# newlib and gdb as peer directories).
+
+# This is nothing like as complex as the official build-avr32-gnu-toolchain.sh
+# script, which will build dependency software and also a Linux/uClibc tool
+# chain.
+
+# The versions of the different tool components are wildly differing in
+# age. GDB and newlib date from 2007, binutils from 2012, while GCC is a 2012
+# patch of a 2009 release. Consequently we cannot make a unified source tree
+# build, and so each component is built on its own.
+
+# For some reason the official script builds a statically linked binutils
+# for Intel Linux platforms (but not Windows). Not sure why this is, unless to
+# make the tool chain movable (the RUNPATH issue). For now this script builds
+# a dynamically linked tool chain.
+
+# Where directories are specified as arguments, they are relative to the
+# current directory, unless specified as absolute names.
+
+###############################################################################
+# configuration
+###############################################################################
+
+git_url="git@github.com:GomSpace"
+# original repos are/were here:
+#git_url="http://github.com/embecosm"
+
+# The repos and the refs to checkout
+# Format is "<dirname>:<repo_url><ref>"
+repos="\
+binutils:avr32-binutils-gdb:avr32-binutils-2.23
+gcc:avr32-gcc:avr32-gcc-4.4
+newlib:avr32-newlib:avr32-newlib-1.16
+gdb:NONE:avr32-gdb-6.7
+"
+
+# Where the install is made
+installdir="${PWD}/install/avr32-gnu-toolchain-linux_x86_64"
+
+# Where the repos are cloned
+repo_dir=avr32
+
+# Atmel AVR Toolchain version and patch level (never to increment)
+VERSION=3.4.2
+PATCHLEVEL=435
+
+
+###############################################################################
+
+if [ -t 1 ]; then
+    c_red="\e[31m"; c_green="\e[32m"; c_yellow="\e[33m"
+    c_mag="\e[35m"; c_cyan="\e[36m";  c_white="\e[37m"
+    c_ired="\e[91m"; c_igreen="\e[92m"; c_iyellow="\e[93m"
+    c_imag="\e[95m"; c_icyan="\e[96m";  c_iwhite="\e[97m"; c_igrey="\e[90m"
+    c_reset="\e[0m"; c_bold="\e[1m"; c_inv="\e[7m"
+fi
+echo_run() { echo -e "\$ ${c_green}$*${c_reset}"; eval "$*"; }
+echo_runok() { echo_run "$*"; exitcode=$?; [ ${exitcode} -eq 0 ] || die "command exitcode ${exitcode}"; }
+echo_norun() { echo -e "\$ ${c_green}$*${c_reset}"; }
+echo_dryrun() { if [ -n "${dryrun}" ]; then echo_norun "$*"; else echo_run "$*"; fi; }
+
+echo_ok() { echo -e "${c_igreen}$*${c_reset}"; }
+echo_bad() { echo -e "${c_ired}$*${c_reset}"; }
+echo_note() { echo -e "${c_imag}${c_bold}$*${c_reset}"; }
+echo_bold() { echo -e "${c_bold}$*${c_reset}"; }
+echo_inv() { echo -e "${c_inv}$*${c_reset}"; }
+echo_debug() { echo -e "${c_igrey}$*${c_reset}"; }
+
+warn()  { >&2 echo -e "${c_iyellow}WARNING: $*${c_reset}"; }
+error() { >&2 echo -e "${c_ired}ERROR: $*${c_reset}"; }
+die()   { error "$*"; exit 1; }
+verb() { [ -n "${verbose}" ] && echo "$*"; }
+
+echo_progress() {
+    [ -n "${progress_file}" ] &&
+        echo "$1" >> ${progress_file}
+}
+
+# Print nice log header
+echo_header() {
+    local title="$1"
+    local length=$(( 73 - ${#title} ))
+    echo
+    printf "==== $title "
+    printf "%*s\n" "${length}" | tr ' ' '='
+    echo
+    echo_progress "----------------------------------------"
+    echo_progress "${title}"
+}
+
+###############################################################################
+
+create_fresh_dir() {
+    local path=$1
+    echo_runok "rm -rf ${path} && mkdir -p ${path}"
+}
+
+echo_runok_progress() {
+    local cmd=$(sed )
+    echo_progress "$*"
+    echo_runok "$*"
+}
+
+# Return true if step <name> has already completed successfully
+is_step_done() {
+    local name=$1
+    if [ -f ${done_dir}/${name} ]; then
+        echo_progress "Step '${name}' already done, skipping"
+        return 0
+    fi
+    return 1
+}
+
+mark_step_done() {
+    local name=$1
+    touch ${done_dir}/${name}
+}
+
+
+###############################################################################
+#
+###############################################################################
+
+_repo_line_split() {
+    IFS=":" read name url ref <<< "$1"
+    #echo "name=${name} url=${url} ref=${ref}"
+}
+
+git_repos_clone() {
+    for line in ${repos}; do
+        _repo_line_split "${line}"
+        if [ -z "${url}" ] || [ "${url}" = "NONE" ]; then
+            continue
+        fi
+
+        dest_dir="${name}"
+        if [ -d "${dest_dir}/.git" ]; then
+            echo_ok "${git_url}/${url} already cloned to ${dest_dir}"
+            continue
+        fi
+        echo_run "git clone ${git_url}/${url} ${dest_dir}"
+    done
+}
+
+git_repos_checkout() {
+    local dirpath=$1
+    for line in ${repos}; do
+        _repo_line_split "${line}"
+
+        echo_runok "git -C ${dirpath}/${name} checkout ${ref}"
+        echo_runok "git -C ${dirpath}/${name} pull"
+    done
+}
+
+avr_repos_clone() {
+    echo_header "Cloning repos"
+    is_step_done 0-git-clone && return 0
+
+    echo_runok "cd ${repo_dir}"
+    git_repos_clone
+    echo_note "Copying 'binutils' repo into 'gdb' because repo contains both"
+    echo_note "and we need to checkout each one on different branches"
+    if [ -d "gdb/.git" ]; then
+        echo_ok "directory/repo gdb already exists"
+    else
+        echo_runok "cp -rld binutils gdb"
+    fi
+    mark_step_done 0-git-clone
+}
+
+avr_repos_checkout() {
+    echo_header "Checking out repos"
+    is_step_done 0-git-checkout && return 0
+
+    echo_runok "cd ${rootdir}"
+    git_repos_checkout ${repo_dir}
+    mark_step_done 0-git-checkout
+}
+
+
+#################################################
+
+configure_binutils() {
+    echo_header "Configuring binutils"
+    is_step_done 1-binutils-configure && return 0
+
+    create_fresh_dir ${bd_binutils}
+    echo_runok_progress "cd ${bd_binutils} &&
+        ${rootdir}/${repo_dir}/binutils/configure --target=avr32 \
+        --disable-nls --disable-werror \
+        ${common_configure_opts} \
+        "
+    mark_step_done 1-binutils-configure
+}
+
+build_binutils() {
+    echo_header "Building binutils"
+    is_step_done 1-binutils-build && return 0
+
+    # Per Arnold magic to get headers to reconfigure. We really need to get this
+    # sorted properly, so plain make works OK.
+    echo_runok_progress "${unbuffer} make ${parallel} all-bfd TARGET-bfd=headers"
+
+    # Force reconfig of bfd
+    echo_runok "rm -f bfd/Makefile"
+
+    echo_runok_progress "cd ${bd_binutils} &&
+        ${unbuffer} make ${parallel} all-build all-binutils all-gas all-ld"
+    mark_step_done 1-binutils-build
+}
+
+install_binutils() {
+    echo_header "Installing binutils"
+    is_step_done 1-binutils-install && return 0
+
+    echo_runok_progress "cd ${bd_binutils} &&
+        ${unbuffer} make install-binutils install-gas install-ld"
+
+    mark_step_done 1-binutils-install
+}
+
+#################################################
+
+configure_gcc_bootstrap() {
+    # Configure gcc bootstrap (pre-Newlib)
+    echo_header "Configuring gcc (bootstrap)"
+    is_step_done 2-gcc-bootstrap-configure && return 0
+
+    create_fresh_dir ${bd_gcc_bs}
+    echo_runok_progress "cd ${bd_gcc_bs} &&
+        CFLAGS='-fgnu89-inline' CXXFLAGS='-fgnu89-inline' \
+        ${rootdir}/${repo_dir}/gcc/configure --target=avr32 \
+        --disable-libssp --disable-shared \
+        --disable-threads --disable-nls \
+        --disable-libstdcxx-pch --without-headers \
+        --enable-languages=c \
+        ${common_configure_opts} \
+        "
+    mark_step_done 2-gcc-bootstrap-configure
+}
+
+build_gcc_bootstrap() {
+    echo_header "Building gcc (bootstrap)"
+    is_step_done 2-gcc-bootstrap-build && return 0
+
+    echo_runok_progress "cd ${bd_gcc_bs} &&
+        make ${libppl} ${parallel_gcc} all-build all-gcc all-target-libgcc"
+
+    mark_step_done 2-gcc-bootstrap-build
+}
+
+install_gcc_bootstrap() {
+    echo_header "Installing gcc (bootstrap)"
+    is_step_done 2-gcc-bootstrap-install && return 0
+
+    echo_runok_progress "cd ${bd_gcc_bs} &&
+        make install-gcc install-target-libgcc"
+
+    mark_step_done 2-gcc-bootstrap-install
+}
+
+#################################################
+
+configure_newlib() {
+    echo_header "Configuring newlib"
+    is_step_done 3-newlib-configure && return 0
+
+    create_fresh_dir ${bd_newlib}
+    echo_runok_progress "cd ${bd_newlib} &&
+        ${rootdir}/${repo_dir}/newlib/configure --target=avr32 \
+        --enable-newlib-io-long-long \
+        --enable-newlib-io-long-double \
+        --enable-newlib-io-pos-args \
+        --enable-newlib-reent-small \
+        --enable-target-optspace \
+        --enable-newlib-retargetable-locking \
+        ${common_configure_opts} \
+        "
+    mark_step_done 3-newlib-configure
+}
+
+build_newlib() {
+    echo_header "Building newlib"
+    is_step_done 3-newlib-build && return 0
+
+    echo_runok_progress "cd ${bd_newlib} &&
+        make ${parallel} all-target-libgloss all-target-newlib"
+
+    mark_step_done 3-newlib-build
+}
+
+install_newlib() {
+    echo_header "Installing newlib"
+    is_step_done 3-newlib-install && return 0
+
+    echo_runok_progress "cd ${bd_newlib} &&
+        make install-target-libgloss install-target-newlib"
+    mark_step_done 3-newlib-install
+}
+
+#################################################
+
+configure_gcc() {
+    echo_header "Configuring gcc (full)"
+    is_step_done 4-gcc-configure && return 0
+
+    create_fresh_dir ${bd_gcc}
+
+    echo_runok_progress "cd ${bd_gcc} &&
+        CFLAGS='-fgnu89-inline' CXXFLAGS='-fgnu89-inline' \
+        ${rootdir}/${repo_dir}/gcc/configure --target=avr32 \
+        --disable-libssp --disable-shared \
+        --disable-threads --disable-nls \
+        --disable-libstdcxx-pch --without-headers \
+        --enable-languages=c,c++ \
+        --with-dwarf2 \
+        --enable-__cxa_atexit --disable-shared --with-newlib \
+        --enable-version-specific-runtime-libs \
+        --disable-shared \
+        ${common_configure_opts} \
+        "
+    mark_step_done 4-gcc-configure
+}
+
+build_gcc() {
+    echo_header "Building gcc (full)"
+    is_step_done 4-gcc-build && return 0
+
+    echo_runok_progress "cd ${bd_gcc} &&
+        make ${libppl} ${parallel_gcc} \
+        all-build \
+        all-gcc \
+        all-target-libgcc \
+        all-target-libstdc++-v3"
+    mark_step_done 4-gcc-build
+}
+
+install_gcc() {
+    echo_header "Installing gcc (full)"
+    is_step_done 4-gcc-install && return 0
+
+    echo_runok_progress "cd ${bd_gcc} &&
+        make install-gcc install-target-libgcc install-target-libstdc++-v3"
+
+    mark_step_done 4-gcc-install
+}
+
+#################################################
+
+configure_gdb() {
+    echo_header "Configuring gdb (full)"
+    is_step_done 5-gdb-configure && return 0
+
+    create_fresh_dir ${bd_gdb}
+    echo_runok_progress "cd ${bd_gdb} &&
+        ${rootdir}/${repo_dir}/gdb/configure --target=avr32 \
+        --disable-nls --disable-werror --with-python \
+        ${common_configure_opts} \
+        "
+    mark_step_done 5-gdb-configure
+}
+
+build_gdb() {
+    echo_header "Building gdb"
+    is_step_done 5-gdb-build && return 0
+
+    echo_runok_progress "cd ${bd_gdb} &&
+        make ${parallel} all-build all-gdb all-sim"
+    mark_step_done 5-gdb-build
+}
+
+install_gdb() {
+    echo_header "Installing gdb"
+    is_step_done 5-gdb-install && return 0
+
+    echo_runok_progress "cd ${bd_gdb} &&
+        make install-gdb install-sim"
+    mark_step_done 5-gdb-install
+}
+
+
+#################################################
+
+create_tarball() {
+    echo_header "Creating tarball of installation"
+
+    echo_runok_progress "cd ${rootdir} &&
+        tar czf avr32-gnu-toolchain-${VERSION}.${PATCHLEVEL}-linux.any.x86_64.tar.gz \
+        -C /usr/local avr32-gnu-toolchain-linux_x86_64"
+
+    # Combine toolchain with headers, avr32 program and install script
+    echo "Creating combined installation package"
+
+    tooldir="gs-avr32-toolchain-${VERSION}"
+    create_fresh_dir ${tooldir}
+#    cd "${rootdir}"
+#    cp install_package/* "${tooldir}"
+#    cp "avr32-gnu-toolchain-${VERSION}.${PATCHLEVEL}-linux.any.x86_64.tar.gz" "${tooldir}"
+#    sed -i "s/avr32-gnu-toolchain-3.4.2.435/avr32-gnu-toolchain-${VERSION}.${PATCHLEVEL}/" "${tooldir}/install-avr32.sh"
+#    tar czf "${tooldir}.tar.gz" "${tooldir}"
+}
+
+
+###############################################################################
+#
+###############################################################################
+
+usage() {
+        cat <<EOF
+Usage: ${0##*/} [OPTION] [clone]
+
+Clone AVR toolchain repos (with 'clone' command)
+Build AVR32 toolchain
+Create tarball of toolchain
+
+NOTE that the build should be made inside a docker container because
+your host system will surely not be able to compile this ancient code.
+Especially texinfo (.texi) files require an ancient texinfo version.
+
+You must clone the repos outside the container if you want to avoid
+git/SSH credential issues. The clone step will be skipped if you try
+to clone from within the container.
+
+OPTIONs:
+    --clean
+        Delete the ${done_dir} files thus forcing a full clean build
+    --install-dir <install_dir>
+        toolchain installation dir. Default is ${installdir}
+    --symlink-dir <symlink_dir>
+        If specified, the install directory will be symlinked to this directory.
+    --datestamp-install
+        If specified, append a date/timestamp to the install directory name.
+    --explicit-libppl
+        Some build environments require libppl_c to be explicitly provided in
+        LDFLAGS (e.g. recent Fedora builds). If so specify this option.
+    --no-parallel-gcc
+        GCC parallel build may not work reliably (seems to be the case with
+        Debian envrionments such as Ubuntu). If so, specify this option to build
+        sequentially.
+    -j,--jobs <count>
+        Argument for 'make'. Default is $(nproc) (output of nproc)
+
+Building on $(lsb_release -sd)
+EOF
+    exit 0
+}
+
+
+# Set defaults for some options
+rootdir=${PWD}
+
+done_dir="${rootdir}/.done"
+
+builddir="${rootdir}/build"
+bd_binutils=${builddir}/binutils
+bd_gcc_bs=${builddir}/gcc-bootstrap
+bd_gcc=${builddir}/gcc
+bd_newlib=${builddir}/newlib
+bd_gdb=${builddir}/gdb
+
+libppl=""
+gcc_parallel=yes
+jobs=$(nproc)
+load=${jobs}
+while [ "$1" ]; do
+    case $1 in
+    --clean)
+        echo_run "rm -rf ${done_dir}/*" ;;
+    --install-dir)
+        installdir=$1; shift ;;
+    --symlink-dir)
+        symlinkdir=$1; shift ;;
+    --datestamp-install)
+        datestamp=-`date +%F-%H%M` ;;
+    --explicit-libppl)
+        libppl="LDFLAGS+=-lppl_c" ;;
+    --no-parallel-gcc)
+	    gcc_parallel="no" ;;
+    -j|--jobs)
+        jobs=$1; shift ;;
+    -h)
+        usage; exit 0 ;;
+    *)
+	    die "Unknown option: '$1'" ;;
+	esac
+	shift
+done
+
+
+###############################################################################
+
+#logfile="${rootdir}/avr32.log"
+#exec 2>&1 > >(tee -a ${logfile})
+#echo_note "Logging to logfile ${logfile}"
+
+#if which unbuffer &>/dev/null; then
+#    echo_note "Using unbuffer"
+#    unbuffer="unbuffer"
+#fi
+
+progress_file="${rootdir}/progress.log"
+echo_run "rm -f ${progress_file}"
+echo_note "Logging progress to ${progress_file}"
+echo "======================================================== " >> ${progress_file}
+echo_note "See progress in other console with: tail -F ${progress_file}"
+
+[ -n "$datestamp" ] &&
+    installdir="${installdir}${datestamp}"
+
+parallel="-j ${jobs}"
+
+if [ "${gcc_parallel}" = "yes" ]; then
+    parallel_gcc="${parallel}"
+else
+    parallel_gcc=""
+fi
+
+# Make sure we stop if something fails
+trap "echo ERROR: Failed due to signal ; date ; exit 1" \
+    HUP INT QUIT SYS PIPE TERM
+
+#################################################
+
+# options used for all "make configure" steps
+common_configure_opts="\
+    --with-pkgversion='AVR32 toolchain ${VERSION} (built on $(lsb_release -sd) $(date +%Y%m%d))' \
+    --with-bugurl='http://www.atmel.com/avr' \
+    --prefix=${installdir} \
+"
+
+echo_header "Starting AVR32 toolchain build $(date)"
+msg="
+  installdir   = ${installdir}
+  done_dir     = ${done_dir}
+  jobs         = ${jobs}
+  libppl       = ${libppl}
+  gcc_parallel = ${gcc_parallel}
+  parallel     = ${parallel}
+  builddir     = ${builddir}
+  common_configure_opts =
+  ${common_configure_opts}
+"
+echo_progress "${msg}"
+echo "${msg}"
+
+echo_run "cd ${rootdir}"
+
+# We'll need the tool chain on the path
+export PATH=${installdir}/bin:$PATH
+
+if [ -n "${CONTAINER}" ]; then
+    echo_note "Skipping clone and checkout from inside docker container"
+    echo_note "Thus avoiding git/ssh credential issues"
+else
+    avr_repos_clone
+    avr_repos_checkout
+fi
+
+configure_binutils
+build_binutils
+install_binutils
+
+configure_gcc_bootstrap
+build_gcc_bootstrap
+install_gcc_bootstrap
+
+configure_newlib
+build_newlib
+install_newlib
+
+configure_gcc
+build_gcc
+install_gcc
+
+configure_gdb
+build_gdb
+install_gdb
+
+
+echo_ok "AVR32 toolchain build DONE: $(date)"
+
+# Link to the defined place. Note the introductory comments about the need to
+# specify explicitly the install directory.
+if [ -n "${symlinkdir}" ]; then
+    echo_run "ln -fs ${installdir} ${symlinkdir}"
+fi

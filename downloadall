@@ -1,0 +1,43 @@
+#!/bin/bash
+
+###############################################################################
+# configuration
+###############################################################################
+
+git_url="git@github.com:GomSpace"
+# original repos are/were here:
+#git_url="http://github.com/embecosm"
+
+# The repos and the refs to checkout
+# Format is "<dirname>:<repo_url><ref>"
+repos="\
+binutils:avr32-binutils-gdb:avr32-binutils-2.23
+gcc:avr32-gcc:avr32-gcc-4.4
+newlib:avr32-newlib:avr32-newlib-1.16
+gdb:NONE:avr32-gdb-6.7
+"
+
+# Versions to download
+GCC_VERSION=4.4.7
+BINUTILS_VERSION=2.23.1
+NEWLIB_VERSION=1.19.0
+DFU_VERSION=0.5.4
+AVR32_PATCH_REV=3.4.2
+ATMEL_HEADER_REV=6.1.3.1475
+
+GCC_ARCHIVE=gcc-${GCC_VERSION}.tar.bz2
+GCC_URL=https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/${GCC_ARCHIVE}
+GCC_MD5=295709feb4441b04e87dea3f1bab4281
+
+BINUTILS_ARCHIVE=binutils-${BINUTILS_VERSION}.tar.bz2
+BINUTILS_URL=https://ftp.gnu.org/gnu/binutils/${BINUTILS_ARCHIVE}
+BINUTILS_MD5=33adb18c3048d057ac58d07a3f1adb38
+
+NEWLIB_ARCHIVE=newlib-${NEWLIB_VERSION}.tar.gz
+NEWLIB_URL=https://sourceware.org/pub/newlib/${NEWLIB_ARCHIVE}
+NEWLIB_MD5=0966e19f03217db9e9076894b47e6601
+
+printf "%10s  %s\n" gcc "${GCC_URL}"
+printf "%10s  %s\n" binutils "${BINUTILS_URL}"
+printf "%10s  %s\n" newlib "${NEWLIB_URL}"
+
